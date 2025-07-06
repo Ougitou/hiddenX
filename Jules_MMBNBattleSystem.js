@@ -15,6 +15,15 @@
  * This plugin implements a battle system inspired by Mega Man Battle Network.
  * Phase 1: Core Scene, Grid, and Player Setup.
  *
+ * @command StartMMBNBattle
+ * @text Start MMBN Battle
+ * @desc Starts a test MMBN-style battle.
+ * @arg troopId
+ * @text Troop ID
+ * @desc The ID of the troop for this battle. Leave 0 for default (Troop 1).
+ * @type troop
+ * @default 0
+ *
  * @param GridRows
  * @text Grid Rows
  * @desc Number of rows in the battle grid.
@@ -91,6 +100,7 @@ Jules.MMBNBattleSystem.Params = {};
 
 (() => {
     'use strict';
+    console.log("Jules_MMBNBattleSystem.js is being parsed - top level");
 
     const params = PluginManager.parameters(Jules.MMBNBattleSystem.pluginName);
 
@@ -129,18 +139,22 @@ Jules.MMBNBattleSystem.Params = {};
     // Plugin Command
     //=============================================================================
     PluginManager.registerCommand(Jules.MMBNBattleSystem.pluginName, "StartMMBNBattle", args => {
-        const troopId = parseInt(args.troopId) || 0; // Allow specifying troopId, default to 0 if not provided/invalid
+        console.log("Jules_MMBNBattleSystem: StartMMBNBattle command triggered with args:", args);
+        const troopId = parseInt(args.troopId) || 0;
+
+        console.log("Jules_MMBNBattleSystem: Setting up BattleManager with troopId:", troopId || 1);
         if (troopId > 0) {
-            BattleManager.setup(troopId, false, false); // Setup troop for data access (e.g., background)
-            // BattleManager.setBattleTest(true); // If needed for certain BattleManager logic
-            // BattleManager.setEventCallback(function(n) { this._eventCallback = n; }.bind(this)); // If using event callbacks
+            BattleManager.setup(troopId, false, false);
         } else {
-            // Handle test battle without specific troop if needed, or default to troop 1
-            // For now, if troopId is 0, we might just use default backgrounds or error.
-            // Let's assume for now that a valid troopId will be used for backgrounds.
-            // If not, Scene_MMBNBattle will need fallbacks.
             BattleManager.setup(1, false, false); // Default to troop 1 if no valid ID
         }
+
+        // It's crucial that $gamePlayer.makeEncounterCount() is called BEFORE BattleManager.setup()
+        // if you want random encounters on map to be suppressed by this battle.
+        // For a direct call from event, this might not be as critical, but good to be aware of.
+        // $gamePlayer.makeEncounterCount(); // Suppresses random encounters on map
+
+        console.log("Jules_MMBNBattleSystem: Pushing Scene_MMBNBattle onto SceneManager.");
         SceneManager.push(Scene_MMBNBattle);
     });
 
@@ -155,16 +169,12 @@ Jules.MMBNBattleSystem.Params = {};
     Scene_MMBNBattle.prototype.constructor = Scene_MMBNBattle;
 
     Scene_MMBNBattle.prototype.initialize = function() {
+        console.log("Jules_MMBNBattleSystem: Scene_MMBNBattle.initialize()");
         Scene_Base.prototype.initialize.call(this);
-        // Scene_Battle properties that might be useful if we mimic more of its flow
-        // this._statusWindow = null;
-        // this._logWindow = null;
-        // this._spriteset = null;
-        // ... and others
-        // For now, minimal initialization.
     };
 
     Scene_MMBNBattle.prototype.create = function() {
+        console.log("Jules_MMBNBattleSystem: Scene_MMBNBattle.create()");
         Scene_Base.prototype.create.call(this);
         this.createDisplayObjects();
     };
@@ -190,35 +200,33 @@ Jules.MMBNBattleSystem.Params = {};
     };
 
     Scene_MMBNBattle.prototype.start = function() {
+        console.log("Jules_MMBNBattleSystem: Scene_MMBNBattle.start()");
         Scene_Base.prototype.start.call(this);
-        SceneManager.clearStack(); // Good practice for custom battle scenes
+        SceneManager.clearStack();
 
-        // Attempt to play troop-specific BGM or a default
-        let bgm = $gameSystem.battleBgm(); // Default battle BGM
-        if ($gameParty.inBattle() && $gameTroop.troop().bgm.name) {
+        let bgm = $gameSystem.battleBgm();
+        // Check if $gameTroop and troop method exist, and if bgm.name is valid
+        if ($gameTroop && typeof $gameTroop.troop === 'function' && $gameTroop.troop() && $gameTroop.troop().bgm && $gameTroop.troop().bgm.name) {
+             // $gameParty.inBattle() might not be true yet when scene is pushed directly.
+             // Relying on BattleManager.setup() to have correctly set up $gameTroop.
             bgm = $gameTroop.troop().bgm;
+            console.log("Jules_MMBNBattleSystem: Using troop BGM:", bgm);
+        } else {
+            console.log("Jules_MMBNBattleSystem: Using system battle BGM or no BGM.", bgm);
         }
         AudioManager.playBgm(bgm);
 
-        // BattleManager.playBattleBgm(); // This also updates $gameSystem.battleBgm() if not already set
-        // For now, direct AudioManager call is fine.
-
-        // Start fade in for scene transition
         this.startFadeIn(this.fadeSpeed(), false);
     };
 
     Scene_MMBNBattle.prototype.update = function() {
+        // console.log("Jules_MMBNBattleSystem: Scene_MMBNBattle.update()"); // Can be too spammy
         Scene_Base.prototype.update.call(this);
 
-        this.updatePlayerControl(); // Handle player input for movement
-
-        // Future main battle logic will go here
-        // e.g., this.updateEnemies();
-        //       this.updateProjectiles();
-        //       this.checkCollisions();
-        //       this.updateBattlePhase(); // etc.
+        this.updatePlayerControl();
 
         if (Input.isTriggered("cancel") || TouchInput.isCancelled()) {
+            console.log("Jules_MMBNBattleSystem: Cancel triggered, popping scene.");
             AudioManager.stopBgm();
             this.popScene();
         }
