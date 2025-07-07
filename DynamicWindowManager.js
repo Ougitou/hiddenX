@@ -177,6 +177,38 @@
  * @type boolean
  * @default false
  *
+ * @param contentText
+ * @text Content Text
+ * @desc Text to draw in the window. Use \\n for new lines. Supports some message codes like \\c[n], \\i[n].
+ * @type multiline_string
+ * @default
+ *
+ * @param contentAlignment
+ * @text Content Alignment
+ * @desc Horizontal alignment for the content text (Currently mainly affects Window_Base with drawText).
+ * @type select
+ * @option left
+ * @value left
+ * @option center
+ * @value center
+ * @option right
+ * @value right
+ * @default left
+ *
+ * @param customPadding
+ * @text Custom Padding
+ * @desc Override default window padding. -1 to use default.
+ * @type number
+ * @min -1
+ * @default -1
+ *
+ * @param customLineHeight
+ * @text Custom Line Height
+ * @desc Override default line height. 0 to use default.
+ * @type number
+ * @min 0
+ * @default 0
+ *
  */
 
 var Jules = Jules || {};
@@ -241,7 +273,11 @@ Jules.DynamicWindowManager.ActiveWindows = {};
                 initiallyOpen: config.initiallyOpen === "true" || config.initiallyOpen === true,
                 commands: commands,
                 cursorFixed: config.cursorFixed === "true" || config.cursorFixed === true,
-                horizontalCommands: config.horizontalCommands === "true" || config.horizontalCommands === true
+                horizontalCommands: config.horizontalCommands === "true" || config.horizontalCommands === true,
+                contentText: String(config.contentText || ""), // New
+                contentAlignment: String(config.contentAlignment || "left"), // New
+                customPadding: Number(config.customPadding !== undefined ? config.customPadding : -1), // New
+                customLineHeight: Number(config.customLineHeight || 0) // New
             };
         });
     }
@@ -256,16 +292,51 @@ Jules.DynamicWindowManager.ActiveWindows = {};
 
         // Common window setup before type-specific instantiation
         const commonSetup = (win) => {
-            // win.windowskin = ImageManager.loadSystem(config.windowskin); // Deferred
             win.setBackgroundType(config.backgroundType);
             win.opacity = config.windowOpacity;
             win.dw_openCloseSpeed = config.openCloseSpeed;
 
+            // Apply custom padding if specified
+            if (config.customPadding >= 0 && typeof win.updatePadding === 'function') {
+                // Directly setting _padding and calling updatePadding is safer for default windows
+                win._padding = config.customPadding;
+                win.updatePadding();
+            }
+
+            // Override lineHeight if specified (instance-specific)
+            if (config.customLineHeight > 0 && typeof win.lineHeight === 'function') {
+                win.lineHeight = function() { return config.customLineHeight; };
+            }
+
+            // Content drawing for Window_Base types with text
+            if (config.windowType === "Window_Base" && config.contentText && config.contentText.trim() !== "") {
+                win.refresh = function() {
+                    this.contents.clear();
+                    const lines = config.contentText.split("\\n"); // Literal \n for new lines
+                    let y = 0;
+                    const x = this.itemPadding(); // For drawTextEx, x is the starting point
+                    // Note: contentAlignment is not fully handled by drawTextEx for block alignment.
+                    // For now, all lines will be left-aligned starting at itemPadding().
+                    // To implement full alignment for drawTextEx, each line would need width calculation
+                    // and x adjustment, or switch to drawText for simpler alignment but less escape code support per line.
+                    for (const line of lines) {
+                        this.drawTextEx(line, x, y);
+                        y += this.lineHeight();
+                    }
+                };
+            }
+
+
             if (config.initiallyOpen) {
-                win.open();
+                win.open(); // This will also call refresh if the window implements it that way
             } else {
                 win.openness = 0;
                 win.close();
+            }
+
+            // Explicitly refresh if open and refresh exists, to ensure content is drawn after all overrides
+            if (win.isOpen() && typeof win.refresh === 'function') {
+                win.refresh();
             }
         };
 
@@ -294,8 +365,8 @@ Jules.DynamicWindowManager.ActiveWindows = {};
                         return Math.max(1, numCmds); // Ensure at least 1 col
                     };
                     // Window_Command constructor calls refresh, which should use new maxCols.
-                    // If not, a manual refresh might be needed after this, or adjust window width based on items.
                 }
+                // Command population logic (ensure it's after commonSetup if refresh is called there)
                 if (config.commands && config.commands.length > 0) {
                     windowInstance.makeCommandList = function() {
                         config.commands.forEach(cmdConfig => {
@@ -304,13 +375,11 @@ Jules.DynamicWindowManager.ActiveWindows = {};
                             this.addCommand(cmdConfig.name, symbol, isEnabled, cmdConfig.ext);
                         });
                     };
-                    // Window_Command constructor calls refresh, which calls its makeCommandList.
-                    // If we override makeCommandList after construction, we might need to manually call refresh
-                    // or ensure it's called if the window is opened.
-                    // However, Window_Command's initialize() calls this.refresh() which calls this.makeCommandList().
-                    // So this should work as the constructor will use the overridden version.
-                    // Let's ensure refresh is called if already open.
-                    if (windowInstance.isOpen()) windowInstance.refresh();
+                    // Window_Command's constructor calls refresh, which will use the overridden makeCommandList.
+                    // If the window was setup to be initially open, commonSetup would have called open(), which calls refresh.
+                    // If it was initially closed, then opened later, its open() will call refresh.
+                    // If already open from commonSetup, and makeCommandList is defined *after* that, ensure refresh.
+                    if (windowInstance.isOpen() && !windowInstance._opening) windowInstance.refresh();
 
 
                     config.commands.forEach(cmdConfig => {
