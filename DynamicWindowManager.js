@@ -121,6 +121,62 @@
  * @type boolean
  * @default true
  *
+ * @param commands
+ * @text Commands/Options
+ * @desc For Command/Options windows: list of entries.
+ * @type struct<CommandEntry>[]
+ * @default []
+ *
+ * @struct CommandEntry
+ *
+ * @param name
+ * @text Name
+ * @desc The text displayed for the command/option.
+ * @type string
+ * @default Command
+ *
+ * @param symbol
+ * @text Symbol
+ * @desc Optional symbol for the command handler. If empty, derived from name.
+ * @type string
+ * @default
+ *
+ * @param enabled
+ * @text Enabled (Default)
+ * @desc Is the command enabled by default? (Can be overridden by JS Condition).
+ * @type boolean
+ * @default true
+ *
+ * @param ext
+ * @text Extra Data (ext)
+ * @desc Optional extra data associated with this command (passed to handler).
+ * @type string
+ * @default
+ *
+ * @param scriptCall
+ * @text Script Call on OK
+ * @desc JavaScript code to execute when this command is triggered.
+ * @type note
+ * @default ""
+ *
+ * @param jsCondition
+ * @text JS Condition (Enabled)
+ * @desc JavaScript code that evaluates to true or false to determine if enabled. Overrides 'Enabled (Default)'.
+ * @type note
+ * @default ""
+ *
+ * @param cursorFixed
+ * @text Cursor Fixed
+ * @desc For Selectable windows, is the cursor fixed (does not move)?
+ * @type boolean
+ * @default false
+ *
+ * @param horizontalCommands
+ * @text Horizontal Commands
+ * @desc For Command windows, arrange commands horizontally?
+ * @type boolean
+ * @default false
+ *
  */
 
 var Jules = Jules || {};
@@ -146,20 +202,46 @@ Jules.DynamicWindowManager.ActiveWindows = {};
     if (rawConfigs) {
         const parsedConfigs = JSON.parse(rawConfigs);
         Jules.DynamicWindowManager.Configs = parsedConfigs.map(configStr => {
-            const config = JSON.parse(configStr); // Each element of struct array is also a string
+            const config = JSON.parse(configStr);
+
+            let commands = [];
+            if (config.commands) {
+                try {
+                    const parsedCommandsArray = JSON.parse(config.commands);
+                    if (Array.isArray(parsedCommandsArray)) {
+                        commands = parsedCommandsArray.map(cmdStr => {
+                            const cmdConfig = JSON.parse(cmdStr);
+                            return {
+                                name: String(cmdConfig.name || "Command"),
+                                symbol: String(cmdConfig.symbol || ""),
+                                enabled: cmdConfig.enabled === "true" || cmdConfig.enabled === true,
+                                ext: String(cmdConfig.ext || ""),
+                                scriptCall: String(cmdConfig.scriptCall || "").trim(),
+                                jsCondition: String(cmdConfig.jsCondition || "").trim()
+                            };
+                        });
+                    }
+                } catch (e) {
+                    console.error("DynamicWindowManager: Error parsing commands for config", config.instanceName, e);
+                }
+            }
+
             return {
                 instanceName: String(config.instanceName || "MyWindow"),
                 sceneName: String(config.sceneName || "Scene_Map"),
                 windowType: String(config.windowType || "Window_Base"),
                 x: Number(config.x || 0),
                 y: Number(config.y || 0),
-                width: Number(config.width || 240), // Default fixed width
-                height: Number(config.height || 180), // Default fixed height
+                width: Number(config.width || 240),
+                height: Number(config.height || 180),
                 windowskin: String(config.windowskin || "Window"),
                 backgroundType: Number(config.backgroundType || 0),
                 windowOpacity: Number(config.windowOpacity !== undefined ? config.windowOpacity : 255),
                 openCloseSpeed: Number(config.openCloseSpeed || 16),
-                initiallyOpen: config.initiallyOpen === "true" || config.initiallyOpen === true // Handle string "true" or boolean true
+                initiallyOpen: config.initiallyOpen === "true" || config.initiallyOpen === true,
+                commands: commands,
+                cursorFixed: config.cursorFixed === "true" || config.cursorFixed === true,
+                horizontalCommands: config.horizontalCommands === "true" || config.horizontalCommands === true
             };
         });
     }
@@ -172,51 +254,123 @@ Jules.DynamicWindowManager.ActiveWindows = {};
         const rect = new Rectangle(config.x, config.y, config.width, config.height);
         let windowInstance = null;
 
+        // Common window setup before type-specific instantiation
+        const commonSetup = (win) => {
+            // win.windowskin = ImageManager.loadSystem(config.windowskin); // Deferred
+            win.setBackgroundType(config.backgroundType);
+            win.opacity = config.windowOpacity;
+            win.dw_openCloseSpeed = config.openCloseSpeed;
+
+            if (config.initiallyOpen) {
+                win.open();
+            } else {
+                win.openness = 0;
+                win.close();
+            }
+        };
+
         switch (config.windowType) {
             case "Window_Base":
                 windowInstance = new Window_Base(rect);
+                commonSetup(windowInstance);
                 break;
             case "Window_Selectable":
                 windowInstance = new Window_Selectable(rect);
+                commonSetup(windowInstance);
+                if (windowInstance.setCursorFixed) { // Check if method exists
+                    windowInstance.setCursorFixed(!!config.cursorFixed);
+                }
                 break;
             case "Window_Command":
-                // Window_Command usually requires makeCommandList, but for just showing the shell:
                 windowInstance = new Window_Command(rect);
-                // It will be empty. We can call _makeCommandList later if options are defined.
+                commonSetup(windowInstance);
+                if (windowInstance.setCursorFixed) {
+                    windowInstance.setCursorFixed(!!config.cursorFixed);
+                }
+                if (config.horizontalCommands) {
+                    windowInstance.maxCols = function() {
+                        // Return number of commands, or a fixed number if too many to fit
+                        const numCmds = this._list ? this._list.length : 1;
+                        return Math.max(1, numCmds); // Ensure at least 1 col
+                    };
+                    // Window_Command constructor calls refresh, which should use new maxCols.
+                    // If not, a manual refresh might be needed after this, or adjust window width based on items.
+                }
+                if (config.commands && config.commands.length > 0) {
+                    windowInstance.makeCommandList = function() {
+                        config.commands.forEach(cmdConfig => {
+                            const isEnabled = cmdConfig.jsCondition ? !!eval(cmdConfig.jsCondition) : cmdConfig.enabled;
+                            const symbol = cmdConfig.symbol || cmdConfig.name.toLowerCase().replace(/\s+/g, '_');
+                            this.addCommand(cmdConfig.name, symbol, isEnabled, cmdConfig.ext);
+                        });
+                    };
+                    // Window_Command constructor calls refresh, which calls its makeCommandList.
+                    // If we override makeCommandList after construction, we might need to manually call refresh
+                    // or ensure it's called if the window is opened.
+                    // However, Window_Command's initialize() calls this.refresh() which calls this.makeCommandList().
+                    // So this should work as the constructor will use the overridden version.
+                    // Let's ensure refresh is called if already open.
+                    if (windowInstance.isOpen()) windowInstance.refresh();
+
+
+                    config.commands.forEach(cmdConfig => {
+                        if (cmdConfig.scriptCall) {
+                            const symbol = cmdConfig.symbol || cmdConfig.name.toLowerCase().replace(/\s+/g, '_');
+                            windowInstance.setHandler(symbol, function() {
+                                console.log("Dynamic Window Command:", cmdConfig.name, "Symbol:", symbol, "Ext:", this.currentExt());
+                                try {
+                                    eval(cmdConfig.scriptCall);
+                                } catch (e) {
+                                    console.error("Error executing scriptCall for command:", cmdConfig.name, e);
+                                }
+                                if (this.active && !this.isClosedOrClosing()) {
+                                    this.activate();
+                                }
+                            }.bind(windowInstance));
+                        }
+                    });
+                }
                 break;
             case "Window_Options":
-                // Window_Options also requires specific setup (makeCommandList, addCommand)
                 windowInstance = new Window_Options(rect);
-                // It will be empty.
+                commonSetup(windowInstance);
+                if (windowInstance.setCursorFixed) {
+                    windowInstance.setCursorFixed(!!config.cursorFixed);
+                }
+                 if (config.commands && config.commands.length > 0) {
+                    windowInstance.makeCommandList = function() {
+                        config.commands.forEach(cmdConfig => {
+                            const isEnabled = cmdConfig.jsCondition ? !!eval(cmdConfig.jsCondition) : cmdConfig.enabled;
+                            const symbol = cmdConfig.symbol || cmdConfig.name.toLowerCase().replace(/\s+/g, '_');
+                            this.addCommand(cmdConfig.name, symbol, isEnabled);
+                        });
+                    };
+                    if (windowInstance.isOpen()) windowInstance.refresh();
+
+                    config.commands.forEach(cmdConfig => {
+                        if (cmdConfig.scriptCall) {
+                            const symbol = cmdConfig.symbol || cmdConfig.name.toLowerCase().replace(/\s+/g, '_');
+                            windowInstance.setHandler(symbol, function() {
+                                console.log("Dynamic Options Window Command:", cmdConfig.name, "Symbol:", symbol);
+                                 try {
+                                    eval(cmdConfig.scriptCall);
+                                } catch (e) {
+                                    console.error("Error executing scriptCall for option:", cmdConfig.name, e);
+                                }
+                                if (this.active && !this.isClosedOrClosing()) {
+                                    this.activate();
+                                }
+                            }.bind(windowInstance));
+                        }
+                    });
+                }
                 break;
             default:
                 console.error("DynamicWindowManager: Unknown window type specified - ", config.windowType);
                 return null;
         }
 
-        if (windowInstance) {
-            // windowInstance.windowskin = ImageManager.loadSystem(config.windowskin); // This needs to be handled carefully
-            // For default windows, changing skin after creation requires more work (refreshing parts).
-            // We'll assume default skin for now, or this property is for custom window types.
-            // A better approach for default windows might be to alias their initialize.
-
-            windowInstance.setBackgroundType(config.backgroundType);
-            windowInstance.opacity = config.windowOpacity; // Overall window opacity for frame/back
-            // windowInstance.contentsOpacity = config.contentsOpacity || 255; // If we add this param
-
-            // openCloseSpeed is used by open() and close() methods internally
-            // We don't directly set a speed property that changes their default behavior
-            // without overriding updateOpen/updateClose.
-            // However, we can store it if our custom open/close logic uses it.
-            windowInstance.dw_openCloseSpeed = config.openCloseSpeed; // Custom property for potential use
-
-            if (config.initiallyOpen) {
-                windowInstance.open(); // Uses its internal speed (Window_Base.OPEN_SPEED (255/frame) or its own updateOpen)
-            } else {
-                windowInstance.openness = 0;
-                windowInstance.close(); // Ensure it's properly closed if not initially open
-            }
-        }
+        // commonSetup(windowInstance) is called inside each case now if windowInstance is created.
         return windowInstance;
     };
 
