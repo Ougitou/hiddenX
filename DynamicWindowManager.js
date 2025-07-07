@@ -209,6 +209,33 @@
  * @min 0
  * @default 0
  *
+ * @param windowBackgroundImage
+ * @text Window Background Image
+ * @desc Image file from img/pictures/ to use as window background.
+ * @type file
+ * @dir img/pictures/
+ * @default
+ *
+ * @param backgroundImageOpacity
+ * @text Background Image Opacity
+ * @desc Opacity for the window background image (0-255).
+ * @type number
+ * @min 0
+ * @max 255
+ * @default 255
+ *
+ * @param parallaxLoopX
+ * @text Parallax Loop X
+ * @desc Horizontal looping speed for the background image (0 for none).
+ * @type number
+ * @default 0
+ *
+ * @param parallaxLoopY
+ * @text Parallax Loop Y
+ * @desc Vertical looping speed for the background image (0 for none).
+ * @type number
+ * @default 0
+ *
  */
 
 var Jules = Jules || {};
@@ -276,8 +303,12 @@ Jules.DynamicWindowManager.ActiveWindows = {};
                 horizontalCommands: config.horizontalCommands === "true" || config.horizontalCommands === true,
                 contentText: String(config.contentText || ""), // New
                 contentAlignment: String(config.contentAlignment || "left"), // New
-                customPadding: Number(config.customPadding !== undefined ? config.customPadding : -1), // New
-                customLineHeight: Number(config.customLineHeight || 0) // New
+                customPadding: Number(config.customPadding !== undefined ? config.customPadding : -1),
+                customLineHeight: Number(config.customLineHeight || 0),
+                windowBackgroundImage: String(config.windowBackgroundImage || ""), // New
+                backgroundImageOpacity: Number(config.backgroundImageOpacity !== undefined ? config.backgroundImageOpacity : 255), // New
+                parallaxLoopX: Number(config.parallaxLoopX || 0), // New
+                parallaxLoopY: Number(config.parallaxLoopY || 0)  // New
             };
         });
     }
@@ -337,6 +368,30 @@ Jules.DynamicWindowManager.ActiveWindows = {};
             // Explicitly refresh if open and refresh exists, to ensure content is drawn after all overrides
             if (win.isOpen() && typeof win.refresh === 'function') {
                 win.refresh();
+            }
+
+            // Handle Window Background Image
+            if (config.windowBackgroundImage && config.windowBackgroundImage !== "") {
+                const bitmap = ImageManager.loadPicture(config.windowBackgroundImage);
+                // Ensure bitmap is loaded before creating TilingSprite to avoid issues with width/height
+                // However, TilingSprite can be created with a not-yet-loaded bitmap.
+                // It will update its texture once the bitmap loads.
+                const bgSprite = new TilingSprite(bitmap);
+
+                bgSprite.width = win.innerWidth; // Use innerWidth/Height to fit inside padding
+                bgSprite.height = win.innerHeight;
+                bgSprite.x = win.padding; // Position it at the content origin
+                bgSprite.y = win.padding;
+
+                bgSprite.opacity = config.backgroundImageOpacity;
+                bgSprite.dw_parallaxX = config.parallaxLoopX; // Store custom parallax speeds
+                bgSprite.dw_parallaxY = config.parallaxLoopY;
+
+                win._dwBgSprite = bgSprite; // Store reference on the window
+                win.addChildAt(win._dwBgSprite, 0); // Add as the very first child (lowest z-index within window)
+
+                // Force window's own background to be transparent so image can be seen
+                win.setBackgroundType(2);
             }
         };
 
@@ -441,6 +496,22 @@ Jules.DynamicWindowManager.ActiveWindows = {};
 
         // commonSetup(windowInstance) is called inside each case now if windowInstance is created.
         return windowInstance;
+    };
+
+    //=============================================================================
+    // Window_Base Parallax Update
+    //=============================================================================
+    const _Window_Base_update = Window_Base.prototype.update;
+    Window_Base.prototype.update = function() {
+        _Window_Base_update.call(this);
+        if (this._dwBgSprite && this._dwBgSprite.bitmap && this._dwBgSprite.bitmap.isReady() && this.isOpen()) {
+            if (this._dwBgSprite.dw_parallaxX !== 0) {
+                this._dwBgSprite.origin.x += this._dwBgSprite.dw_parallaxX;
+            }
+            if (this._dwBgSprite.dw_parallaxY !== 0) {
+                this._dwBgSprite.origin.y += this._dwBgSprite.dw_parallaxY;
+            }
+        }
     };
 
     const _Scene_Base_createWindowLayer = Scene_Base.prototype.createWindowLayer;
