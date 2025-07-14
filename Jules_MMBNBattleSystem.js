@@ -90,6 +90,19 @@
  * @min 1
  * @default 20
  *
+ * @param ParticleScenes
+ * @text Particle Scenes
+ * @desc A list of scenes to add particle effects to.
+ * @type string[]
+ * @default ["Scene_Title", "Scene_Map"]
+ *
+ * @param ParticleCount
+ * @text Particle Count
+ * @desc The number of particles to display.
+ * @type number
+ * @min 0
+ * @default 50
+ *
  */
 
 var Jules = Jules || {};
@@ -114,6 +127,8 @@ Jules.MMBNBattleSystem.Params = {};
     Jules.MMBNBattleSystem.Params.DefaultPlayerActorId = parseInt(params['DefaultPlayerActorId']) || 1;
     Jules.MMBNBattleSystem.Params.WindowOpenCloseSpeed = parseInt(params['WindowOpenCloseSpeed']) || 15;
     Jules.MMBNBattleSystem.Params.GaugeChangeSpeed = parseInt(params['GaugeChangeSpeed']) || 20;
+    Jules.MMBNBattleSystem.Params.ParticleScenes = JSON.parse(params['ParticleScenes'] || '["Scene_Title", "Scene_Map"]');
+    Jules.MMBNBattleSystem.Params.ParticleCount = parseInt(params['ParticleCount']) || 50;
 
     //=============================================================================
     // Easing Functions
@@ -133,6 +148,18 @@ Jules.MMBNBattleSystem.Params = {};
             return -c * t * (t - 2) + b;
         }
         // Future: easeInQuad, easeInOutQuad, easeOutCubic, etc. can be added here.
+    };
+
+    //=============================================================================
+    // Scene_Base
+    //=============================================================================
+    const _Scene_Base_create = Scene_Base.prototype.create;
+    Scene_Base.prototype.create = function() {
+        _Scene_Base_create.call(this);
+        if (Jules.MMBNBattleSystem.Params.ParticleScenes.includes(this.constructor.name)) {
+            this._particleSprite = new Sprite_Particles();
+            this.addChild(this._particleSprite);
+        }
     };
 
     //=============================================================================
@@ -549,5 +576,70 @@ Jules.MMBNBattleSystem.Params = {};
         this.addChild(this._playerSprite);
     };
 
+    //=============================================================================
+    // Sprite_Particles
+    //=============================================================================
+    function Sprite_Particles() {
+        this.initialize(...arguments);
+    }
+
+    Sprite_Particles.prototype = Object.create(Sprite.prototype);
+    Sprite_Particles.prototype.constructor = Sprite_Particles;
+
+    Sprite_Particles.prototype.initialize = function() {
+        Sprite.prototype.initialize.call(this);
+        this.createParticles();
+    };
+
+    Sprite_Particles.prototype.createParticles = function() {
+        this._particles = [];
+        for (let i = 0; i < Jules.MMBNBattleSystem.Params.ParticleCount; i++) {
+            this._particles.push(this.createParticle());
+        }
+    };
+
+    Sprite_Particles.prototype.createParticle = function() {
+        const particle = new Sprite(new Bitmap(2, 2));
+        particle.bitmap.fillAll('white');
+        particle.anchor.x = 0.5;
+        particle.anchor.y = 0.5;
+        this.addChild(particle);
+        this.resetParticle(particle);
+        return particle;
+    };
+
+    Sprite_Particles.prototype.resetParticle = function(particle) {
+        particle.x = Math.random() * Graphics.width;
+        particle.y = Math.random() * Graphics.height;
+        particle.opacity = 0;
+        particle.speedX = (Math.random() - 0.5) * 2;
+        particle.speedY = (Math.random() - 0.5) * 2;
+        particle.life = Math.random() * 200 + 100;
+    };
+
+    Sprite_Particles.prototype.update = function() {
+        Sprite.prototype.update.call(this);
+        this.updateParticles();
+    };
+
+    Sprite_Particles.prototype.updateParticles = function() {
+        for (const particle of this._particles) {
+            this.updateParticle(particle);
+        }
+    };
+
+    Sprite_Particles.prototype.updateParticle = function(particle) {
+        particle.life--;
+        if (particle.life <= 0) {
+            this.resetParticle(particle);
+        }
+        particle.x += particle.speedX;
+        particle.y += particle.speedY;
+        if (particle.life < 100) {
+            particle.opacity = (particle.life / 100) * 255;
+        } else {
+            particle.opacity = 255;
+        }
+    };
 
 })();
