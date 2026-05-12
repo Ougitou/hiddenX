@@ -1,0 +1,22 @@
+{
+  "0": [
+    {"type": "clearSprites"},
+    {"type": "bg", "name": "Woods", "layer": "background"},
+    {"type": "bg", "name": "Grass", "layer": "foreground"},
+    {"type": "music", "name": "Nature", "volume": 90}
+  ],
+  "1": [
+    {"type": "bust", "name": "MysteriousGuy", "pos": "upperLeft", "effect": "fadeIn", "duration": 60}
+  ],
+  "2": [
+    {"type": "clearSprites"},
+    {"type": "bust", "name": "MysteriousGuy", "pos": "lowerLeft", "effect": "move", "duration": 30}
+  ],
+  "3": [
+    {"type": "se", "name": "Talk"}
+  ],
+  "4": [
+    {"type": "item", "name": "AncientRelic", "effect": "zoomIn", "duration": 45},
+    {"type": "particles", "name": "Sparkles"}
+  ]
+}
