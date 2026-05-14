@@ -14,6 +14,17 @@
  *
  * Use the following command to start the reader:
  *   SceneManager.push(Scene_LNReader);
+ *
+ * @param menuCommandName
+ * @text Menu Command Name
+ * @desc The name of the command shown in the main menu.
+ * @default LN Reader
+ *
+ * @param showInMenu
+ * @text Show in Menu
+ * @desc Whether to show the LN Reader command in the main menu.
+ * @type boolean
+ * @default true
  */
 
 var Jules = Jules || {};
@@ -21,6 +32,11 @@ Jules.LNReader = Jules.LNReader || {};
 
 (() => {
     "use strict";
+
+    const pluginName = "Jules_LNReader";
+    const parameters = PluginManager.parameters(pluginName);
+    const menuCommandName = String(parameters["menuCommandName"] || "LN Reader");
+    const showInMenu = parameters["showInMenu"] === "true";
 
     //-----------------------------------------------------------------------------
     // LN_Manager
@@ -163,10 +179,12 @@ Jules.LNReader = Jules.LNReader || {};
         applyEffect(effect, duration) {
             this._effect = effect;
             this._duration = duration || 60;
+            this._initialDuration = this._duration;
             if (effect === "fadeIn") {
                 this.opacity = 0;
             } else if (effect === "move") {
                 this.x = -this.width; // Start from offscreen left
+                this._startX = this.x;
             }
         }
 
@@ -174,9 +192,9 @@ Jules.LNReader = Jules.LNReader || {};
             super.update();
             if (this._duration > 0) {
                 if (this._effect === "fadeIn") {
-                    this.opacity += 255 / (this._duration || 60);
+                    this.opacity += 255 / this._initialDuration;
                 } else if (this._effect === "move") {
-                    this.x += (this._targetX - this.x) / this._duration;
+                    this.x += (this._targetX - this._startX) / this._initialDuration;
                 }
                 this._duration--;
             }
@@ -205,6 +223,7 @@ Jules.LNReader = Jules.LNReader || {};
         applyEffect(effect, duration) {
             this._effect = effect;
             this._duration = duration || 60;
+            this._initialDuration = this._duration;
             if (effect === "zoomIn") {
                 this.scale.x = 0;
                 this.scale.y = 0;
@@ -215,8 +234,8 @@ Jules.LNReader = Jules.LNReader || {};
             super.update();
             if (this._duration > 0) {
                 if (this._effect === "zoomIn") {
-                    this.scale.x += 1 / (this._duration || 60);
-                    this.scale.y += 1 / (this._duration || 60);
+                    this.scale.x += 1 / this._initialDuration;
+                    this.scale.y += 1 / this._initialDuration;
                 }
                 this._duration--;
             }
@@ -347,6 +366,7 @@ Jules.LNReader = Jules.LNReader || {};
             this._controlsWindow.setHandler("skipB", this.onControlSkipB.bind(this));
             this._controlsWindow.setHandler("mute", this.onControlMute.bind(this));
             this._controlsWindow.setHandler("settings", this.onControlSettings.bind(this));
+            this._controlsWindow.setHandler("cancel", this.popScene.bind(this));
             this.addWindow(this._controlsWindow);
             this._controlsWindow.activate();
             this._controlsWindow.select(0);
@@ -521,5 +541,25 @@ Jules.LNReader = Jules.LNReader || {};
 
     window.Scene_LNReader = Scene_LNReader;
     Jules.LNReader.Scene_LNReader = Scene_LNReader;
+
+    //-----------------------------------------------------------------------------
+    // Menu Integration
+    //
+
+    const _Window_MenuCommand_addMainCommands = Window_MenuCommand.prototype.addMainCommands;
+    Window_MenuCommand.prototype.addMainCommands = function() {
+        _Window_MenuCommand_addMainCommands.call(this);
+        if (showInMenu) {
+            this.addCommand(menuCommandName, "lnReader", true);
+        }
+    };
+
+    const _Scene_Menu_createCommandWindow = Scene_Menu.prototype.createCommandWindow;
+    Scene_Menu.prototype.createCommandWindow = function() {
+        _Scene_Menu_createCommandWindow.call(this);
+        this._commandWindow.setHandler("lnReader", () => {
+            SceneManager.push(Scene_LNReader);
+        });
+    };
 
 })();
