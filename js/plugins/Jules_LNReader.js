@@ -25,6 +25,16 @@
  * @desc Whether to show the LN Reader command in the main menu.
  * @type boolean
  * @default true
+ *
+ * @param storyFile
+ * @text Story File
+ * @desc The path to the story .txt file.
+ * @default text/story.txt
+ *
+ * @param triggerFile
+ * @text Trigger File
+ * @desc The path to the trigger data file.
+ * @default text/triggers.txt
  */
 
 var Jules = Jules || {};
@@ -37,6 +47,17 @@ Jules.LNReader = Jules.LNReader || {};
     const parameters = PluginManager.parameters(pluginName);
     const menuCommandName = String(parameters["menuCommandName"] || "LN Reader");
     const showInMenu = parameters["showInMenu"] === "true";
+    const storyFilePath = String(parameters["storyFile"] || "text/story.txt");
+    const triggerFilePath = String(parameters["triggerFile"] || "text/triggers.txt");
+
+    const LN_STATE = {
+        INIT: "init",
+        LOADING: "loading",
+        READY: "ready",
+        PLAYING: "playing",
+        PAUSED: "paused",
+        ERROR: "error"
+    };
 
     //-----------------------------------------------------------------------------
     // LN_Manager
@@ -52,32 +73,40 @@ Jules.LNReader = Jules.LNReader || {};
             this._story = [];
             this._triggers = {};
             this._currentIndex = -1;
-            this._isReady = false;
+            this._state = LN_STATE.INIT;
+        }
+
+        static state() {
+            return this._state;
+        }
+
+        static setState(state) {
+            this._state = state;
         }
 
         static isReady() {
-            return this._isReady;
+            return this._state !== LN_STATE.INIT && this._state !== LN_STATE.LOADING;
         }
 
         static async loadData() {
+            this.setState(LN_STATE.LOADING);
             try {
-                const storyRes = await fetch("text/story.txt");
-                if (!storyRes.ok) throw new Error("Could not load text/story.txt");
+                const storyRes = await fetch(storyFilePath);
+                if (!storyRes.ok) throw new Error("Could not load " + storyFilePath);
                 const storyText = await storyRes.text();
                 this._story = storyText.split(/\r?\n/).filter(line => line.trim() !== "");
 
-                const triggersRes = await fetch("text/triggers.txt");
-                if (!triggersRes.ok) throw new Error("Could not load text/triggers.txt");
+                const triggersRes = await fetch(triggerFilePath);
+                if (!triggersRes.ok) throw new Error("Could not load " + triggerFilePath);
                 const triggersJson = await triggersRes.json();
                 this._triggers = triggersJson;
 
                 this._currentIndex = 0;
-                this._isReady = true;
+                this.setState(LN_STATE.READY);
             } catch (e) {
                 console.error("LN_Manager: Failed to load data", e);
-                // Fallback or error handling
                 this._story = ["Error: Could not load story data."];
-                this._isReady = true;
+                this.setState(LN_STATE.ERROR);
             }
         }
 
@@ -271,7 +300,7 @@ Jules.LNReader = Jules.LNReader || {};
             const rect = this.itemLineRect(index);
             const commands = ["Play", "Next", "Prev", "FF", "RW", "Mute", "Set"];
             let text = commands[index];
-            if (index === 0 && SceneManager._scene && SceneManager._scene._isPlaying) {
+            if (index === 0 && LN_Manager.state() === LN_STATE.PLAYING) {
                 text = "Pause";
             }
             this.drawText(text, rect.x, rect.y, rect.width, "center");
@@ -319,7 +348,7 @@ Jules.LNReader = Jules.LNReader || {};
         createLayout() {
             const width = Graphics.width;
             const height = Graphics.height;
-            this._controlHeight = Math.floor(height * 0.08);
+            this._controlHeight = Math.floor(height * 0.12);
             const mainHeight = height - this._controlHeight;
             this._halfHeight = Math.floor(mainHeight / 2);
 
@@ -374,11 +403,24 @@ Jules.LNReader = Jules.LNReader || {};
 
         update() {
             super.update();
-            this.updateAutoPlay();
+            this.updateStateMachine();
+        }
+
+        updateStateMachine() {
+            switch (LN_Manager.state()) {
+                case LN_STATE.READY:
+                    // Just transitioned to ready, maybe start playing?
+                    break;
+                case LN_STATE.PLAYING:
+                    this.updateAutoPlay();
+                    break;
+                case LN_STATE.PAUSED:
+                    break;
+            }
         }
 
         updateAutoPlay() {
-            if (this._isPlaying && !this.isBusy()) {
+            if (!this.isBusy()) {
                 this._playWaitCount = (this._playWaitCount || 0) + 1;
                 if (this._playWaitCount >= 120) { // 2 seconds delay
                     this._playWaitCount = 0;
@@ -392,7 +434,11 @@ Jules.LNReader = Jules.LNReader || {};
         }
 
         onControlPlay() {
-            this._isPlaying = !this._isPlaying;
+            if (LN_Manager.state() === LN_STATE.PLAYING) {
+                LN_Manager.setState(LN_STATE.PAUSED);
+            } else {
+                LN_Manager.setState(LN_STATE.PLAYING);
+            }
             this._playWaitCount = 0;
             this._controlsWindow.refresh();
             this._controlsWindow.activate();
