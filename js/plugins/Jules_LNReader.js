@@ -237,6 +237,7 @@ Jules.LNReader = Jules.LNReader || {};
             super(rect);
             this.opacity = 0;
             this.padding = 0;
+            this.openness = 255; // Ensure window is open to process input
             this._playWaitCount = 0;
             this._busts = {};
             this._itemSprite = null;
@@ -371,6 +372,7 @@ Jules.LNReader = Jules.LNReader || {};
         onControlMute() {
             ConfigManager.bgmVolume = ConfigManager.bgmVolume > 0 ? 0 : 100;
             ConfigManager.save();
+            ConfigManager.applyData();
         }
 
         onControlSettings() {
@@ -456,7 +458,10 @@ Jules.LNReader = Jules.LNReader || {};
                 this.onControlPlay, this.onControlNext, this.onControlPrev,
                 this.onControlSkipF, this.onControlSkipB, this.onControlMute, this.onControlSettings
             ];
-            if (handlers[index]) handlers[index].call(this);
+            if (handlers[index]) {
+                this.playOkSound();
+                handlers[index].call(this);
+            }
             this.activate();
         }
     }
