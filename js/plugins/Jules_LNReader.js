@@ -4,13 +4,13 @@
 
 /*:
  * @target MZ
- * @plugindesc (v1.0.0) A light novel reader for RPG Maker MZ.
+ * @plugindesc (v1.0.0) A consolidated single-window light novel reader for RPG Maker MZ.
  * @author Jules
  *
  * @help Jules_LNReader.js
  *
- * This plugin creates a light novel reader scene.
- * It reads story text from text/story.txt and trigger data from text/triggers.txt.
+ * This plugin creates a light novel reader scene that uses a single window
+ * for all visuals and controls.
  *
  * Use the following command to start the reader:
  *   SceneManager.push(Scene_LNReader);
@@ -76,17 +76,9 @@ Jules.LNReader = Jules.LNReader || {};
             this._state = LN_STATE.INIT;
         }
 
-        static state() {
-            return this._state;
-        }
-
-        static setState(state) {
-            this._state = state;
-        }
-
-        static isReady() {
-            return this._state !== LN_STATE.INIT && this._state !== LN_STATE.LOADING;
-        }
+        static state() { return this._state; }
+        static setState(state) { this._state = state; }
+        static isReady() { return this._state !== LN_STATE.INIT && this._state !== LN_STATE.LOADING; }
 
         static async loadData() {
             this.setState(LN_STATE.LOADING);
@@ -110,13 +102,8 @@ Jules.LNReader = Jules.LNReader || {};
             }
         }
 
-        static currentText() {
-            return this._story[this._currentIndex] || "";
-        }
-
-        static currentTriggers() {
-            return this._triggers[this._currentIndex] || [];
-        }
+        static currentText() { return this._story[this._currentIndex] || ""; }
+        static currentTriggers() { return this._triggers[this._currentIndex] || []; }
 
         static next() {
             if (this._currentIndex < this._story.length - 1) {
@@ -138,43 +125,12 @@ Jules.LNReader = Jules.LNReader || {};
             this._currentIndex = Math.max(0, Math.min(index, this._story.length - 1));
         }
 
-        static currentIndex() {
-            return this._currentIndex;
-        }
-
-        static storyLength() {
-            return this._story.length;
-        }
+        static currentIndex() { return this._currentIndex; }
+        static storyLength() { return this._story.length; }
     }
 
     Jules.LNReader.Manager = LN_Manager;
     LN_Manager.initialize();
-
-    //-----------------------------------------------------------------------------
-    // Window_LNNarrative
-    //
-    // The window for displaying narrative text at the line between background layers.
-
-    class Window_LNNarrative extends Window_Base {
-        constructor(rect) {
-            super(rect);
-            this.setBackgroundType(2); // Transparent
-            this._text = "";
-        }
-
-        setText(text) {
-            if (this._text !== text) {
-                this._text = text;
-                this.refresh();
-            }
-        }
-
-        refresh() {
-            this.contents.clear();
-            const width = this.contentsWidth();
-            this.drawTextEx(this._text, 0, 0, width);
-        }
-    }
 
     //-----------------------------------------------------------------------------
     // Sprite_LNBust
@@ -196,10 +152,10 @@ Jules.LNReader = Jules.LNReader || {};
 
             if (pos === "lowerLeft") {
                 this._targetX = Graphics.width * 0.2;
-                this._targetY = Graphics.height * 0.92;
+                this._targetY = Graphics.height * 0.88;
             } else if (pos === "upperLeft") {
                 this._targetX = Graphics.width * 0.2;
-                this._targetY = Graphics.height * 0.46;
+                this._targetY = Graphics.height * 0.44;
             }
             this.x = this._targetX;
             this.y = this._targetY;
@@ -212,7 +168,7 @@ Jules.LNReader = Jules.LNReader || {};
             if (effect === "fadeIn") {
                 this.opacity = 0;
             } else if (effect === "move") {
-                this.x = -this.width; // Start from offscreen left
+                this.x = -200; // Simplified start position
                 this._startX = this.x;
             }
         }
@@ -272,225 +228,157 @@ Jules.LNReader = Jules.LNReader || {};
     }
 
     //-----------------------------------------------------------------------------
-    // Window_LNControls
+    // Window_LNReader
     //
-    // The control bar at the bottom of the screen.
+    // Consolidated window for everything.
 
-    class Window_LNControls extends Window_Selectable {
+    class Window_LNReader extends Window_Selectable {
         constructor(rect) {
             super(rect);
-            this.opacity = 255;
+            this.opacity = 0;
+            this.padding = 0;
+            this._playWaitCount = 0;
+            this._busts = {};
+            this._itemSprite = null;
+            this._animations = [];
+            this.createVisualLayers();
             this.refresh();
         }
 
-        maxCols() {
-            return 7; // Play, Next, Prev, Skip F, Skip B, Mute, Settings
+        createVisualLayers() {
+            const width = Graphics.width;
+            const height = Graphics.height;
+            this._controlHeight = Math.floor(height * 0.12);
+            this._visualHeight = height - this._controlHeight;
+            this._halfVisualHeight = Math.floor(this._visualHeight / 2);
+
+            // Layers
+            this._bgContainer = new Sprite();
+            this.addChildAt(this._bgContainer, 0);
+
+            this._bgUpper = new Sprite();
+            this._bgUpper.bitmap = new Bitmap(width, this._halfVisualHeight);
+            this._bgContainer.addChild(this._bgUpper);
+
+            this._bgLower = new Sprite();
+            this._bgLower.y = this._halfVisualHeight;
+            this._bgLower.bitmap = new Bitmap(width, this._halfVisualHeight);
+            this._bgContainer.addChild(this._bgLower);
+
+            this._spriteLayer = new Sprite();
+            this.addChildAt(this._spriteLayer, 1);
         }
 
-        maxItems() {
-            return 7;
-        }
+        maxCols() { return 7; }
+        maxItems() { return 7; }
 
         itemRect(index) {
-            const rect = super.itemRect(index);
-            return rect;
+            const width = Math.floor(this.innerWidth / this.maxCols());
+            const height = this._controlHeight;
+            const x = index * width;
+            const y = this.innerHeight - height;
+            return new Rectangle(x, y, width, height);
+        }
+
+        drawAllItems() {
+            const rect = new Rectangle(0, this.innerHeight - this._controlHeight, this.innerWidth, this._controlHeight);
+            this.contents.fillRect(rect.x, rect.y, rect.width, rect.height, "#00000088");
+            super.drawAllItems();
         }
 
         drawItem(index) {
             const rect = this.itemLineRect(index);
             const commands = ["Play", "Next", "Prev", "FF", "RW", "Mute", "Set"];
             let text = commands[index];
-            if (index === 0 && LN_Manager.state() === LN_STATE.PLAYING) {
-                text = "Pause";
-            }
+            if (index === 0 && LN_Manager.state() === LN_STATE.PLAYING) text = "Pause";
+            this.contents.fontSize = 20;
             this.drawText(text, rect.x, rect.y, rect.width, "center");
         }
 
-        processOk() {
-            const index = this.index();
-            this.callHandler(this.indexToSymbol(index));
+        refresh() {
+            if (this.contents) {
+                this.contents.clear();
+                this.drawAllItems();
+                this.drawNarrative();
+            }
         }
 
-        indexToSymbol(index) {
-            const symbols = ["play", "next", "prev", "skipF", "skipB", "mute", "settings"];
-            return symbols[index];
-        }
-    }
-
-    //-----------------------------------------------------------------------------
-    // Scene_LNReader
-    //
-    // The scene class for the light novel reader.
-
-    class Scene_LNReader extends Scene_Base {
-        constructor() {
-            super();
-        }
-
-        create() {
-            super.create();
-            this.createBackground();
-            this.createLayout();
-            this.createWindowLayer();
-            this.createNarrativeWindow();
-            this.createControlsWindow();
-            LN_Manager.loadData().then(() => {
-                this.onDataReady();
-            });
-        }
-
-        createBackground() {
-            this._backgroundSprite = new Sprite();
-            this._backgroundSprite.bitmap = SceneManager.backgroundBitmap();
-            this.addChild(this._backgroundSprite);
-        }
-
-        createLayout() {
-            const width = Graphics.width;
-            const height = Graphics.height;
-            this._controlHeight = Math.floor(height * 0.12);
-            const mainHeight = height - this._controlHeight;
-            this._halfHeight = Math.floor(mainHeight / 2);
-
-            // Container for background (upper) and foreground (lower)
-            this._mainContainer = new Sprite();
-            this.addChild(this._mainContainer);
-
-            this._bgUpper = new Sprite();
-            this._bgUpper.move(0, 0);
-            this._bgUpper.bitmap = new Bitmap(width, this._halfHeight);
-            this._mainContainer.addChild(this._bgUpper);
-
-            this._bgLower = new Sprite();
-            this._bgLower.move(0, this._halfHeight);
-            this._bgLower.bitmap = new Bitmap(width, this._halfHeight);
-            this._mainContainer.addChild(this._bgLower);
-
-            // Layer for character busts and items
-            this._spriteLayer = new Sprite();
-            this.addChild(this._spriteLayer);
-        }
-
-        createNarrativeWindow() {
-            const width = Graphics.width;
-            const height = 80; // Estimated height for text
-            const x = 0;
-            const y = this._halfHeight - (height / 2);
-            const rect = new Rectangle(x, y, width, height);
-            this._narrativeWindow = new Window_LNNarrative(rect);
-            this.addWindow(this._narrativeWindow);
-        }
-
-        createControlsWindow() {
-            const width = Graphics.width;
-            const height = this._controlHeight;
-            const x = 0;
-            const y = Graphics.height - height;
-            const rect = new Rectangle(x, y, width, height);
-            this._controlsWindow = new Window_LNControls(rect);
-            this._controlsWindow.setHandler("play", this.onControlPlay.bind(this));
-            this._controlsWindow.setHandler("next", this.onControlNext.bind(this));
-            this._controlsWindow.setHandler("prev", this.onControlPrev.bind(this));
-            this._controlsWindow.setHandler("skipF", this.onControlSkipF.bind(this));
-            this._controlsWindow.setHandler("skipB", this.onControlSkipB.bind(this));
-            this._controlsWindow.setHandler("mute", this.onControlMute.bind(this));
-            this._controlsWindow.setHandler("settings", this.onControlSettings.bind(this));
-            this._controlsWindow.setHandler("cancel", this.popScene.bind(this));
-            this.addWindow(this._controlsWindow);
-            this._controlsWindow.activate();
-            this._controlsWindow.select(0);
+        drawNarrative() {
+            const text = LN_Manager.currentText();
+            const width = this.innerWidth;
+            const y = this._halfVisualHeight - 40;
+            this.contents.fontSize = 26;
+            this.drawTextEx(text, 20, y, width - 40);
         }
 
         update() {
             super.update();
             this.updateStateMachine();
+            this.updateInternalSprites();
         }
 
         updateStateMachine() {
-            switch (LN_Manager.state()) {
-                case LN_STATE.READY:
-                    // Just transitioned to ready, maybe start playing?
-                    break;
-                case LN_STATE.PLAYING:
-                    this.updateAutoPlay();
-                    break;
-                case LN_STATE.PAUSED:
-                    break;
-            }
-        }
-
-        updateAutoPlay() {
-            if (!this.isBusy()) {
-                this._playWaitCount = (this._playWaitCount || 0) + 1;
-                if (this._playWaitCount >= 120) { // 2 seconds delay
+            if (LN_Manager.state() === LN_STATE.PLAYING) {
+                this._playWaitCount++;
+                if (this._playWaitCount >= 120) {
                     this._playWaitCount = 0;
                     this.onControlNext();
                 }
             }
         }
 
-        isBusy() {
-            return this._narrativeWindow.isOpening() || this._narrativeWindow.isClosing();
+        updateInternalSprites() {
+            // Manually update sprites that are children of the window
+            for (const child of this._spriteLayer.children) {
+                if (child.update) child.update();
+            }
+            // Update animations
+            for (let i = this._animations.length - 1; i >= 0; i--) {
+                const anim = this._animations[i];
+                if (anim.update) anim.update();
+                if (!anim.isPlaying()) {
+                    this._spriteLayer.removeChild(anim);
+                    this._animations.splice(i, 1);
+                }
+            }
         }
 
         onControlPlay() {
-            if (LN_Manager.state() === LN_STATE.PLAYING) {
-                LN_Manager.setState(LN_STATE.PAUSED);
-            } else {
-                LN_Manager.setState(LN_STATE.PLAYING);
-            }
+            if (LN_Manager.state() === LN_STATE.PLAYING) LN_Manager.setState(LN_STATE.PAUSED);
+            else LN_Manager.setState(LN_STATE.PLAYING);
             this._playWaitCount = 0;
-            this._controlsWindow.refresh();
-            this._controlsWindow.activate();
+            this.refresh();
         }
 
         onControlNext() {
-            if (LN_Manager.next()) {
-                this.refreshReader();
-            }
-            this._controlsWindow.activate();
+            if (LN_Manager.next()) this.refreshReader();
         }
 
         onControlPrev() {
-            if (LN_Manager.previous()) {
-                this.refreshReader();
-            }
-            this._controlsWindow.activate();
+            if (LN_Manager.previous()) this.refreshReader();
         }
 
         onControlSkipF() {
             LN_Manager.jumpTo(LN_Manager.currentIndex() + 10);
             this.refreshReader();
-            this._controlsWindow.activate();
         }
 
         onControlSkipB() {
             LN_Manager.jumpTo(LN_Manager.currentIndex() - 10);
             this.refreshReader();
-            this._controlsWindow.activate();
         }
 
         onControlMute() {
-            if (AudioManager.bgmVolume > 0) {
-                this._lastVolume = AudioManager.bgmVolume;
-                AudioManager.bgmVolume = 0;
-            } else {
-                AudioManager.bgmVolume = this._lastVolume || 100;
-            }
-            this._controlsWindow.activate();
+            ConfigManager.bgmVolume = ConfigManager.bgmVolume > 0 ? 0 : 100;
+            ConfigManager.save();
         }
 
         onControlSettings() {
             SceneManager.push(Scene_Options);
         }
 
-        onDataReady() {
-            console.log("LN Data Ready. Story lines:", LN_Manager.storyLength());
-            this.refreshReader();
-        }
-
         refreshReader() {
-            this._narrativeWindow.setText(LN_Manager.currentText());
+            this.refresh();
             this.executeTriggers(LN_Manager.currentTriggers());
         }
 
@@ -498,95 +386,112 @@ Jules.LNReader = Jules.LNReader || {};
             if (!triggers || !Array.isArray(triggers)) return;
             for (const trigger of triggers) {
                 switch (trigger.type) {
-                    case "bg":
-                        this.updateBackgroundLayer(trigger.name, trigger.layer);
-                        break;
-                    case "bust":
-                        this.showBust(trigger.name, trigger.pos, trigger.effect, trigger.duration);
-                        break;
-                    case "item":
-                        this.showItem(trigger.name, trigger.effect, trigger.duration);
-                        break;
-                    case "music":
-                        this.playMusic(trigger.name, trigger.volume);
-                        break;
-                    case "se":
-                        this.playSe(trigger.name);
-                        break;
-                    case "particles":
-                        this.playParticles(trigger.name);
-                        break;
-                    case "clearSprites":
-                        this.clearSprites();
-                        break;
+                    case "bg": this.updateBackgroundLayer(trigger.name, trigger.layer); break;
+                    case "bust": this.showBust(trigger.name, trigger.pos, trigger.effect, trigger.duration); break;
+                    case "item": this.showItem(trigger.name, trigger.effect, trigger.duration); break;
+                    case "music": this.playMusic(trigger.name, trigger.volume); break;
+                    case "se": this.playSe(trigger.name); break;
+                    case "particles": this.playParticles(trigger.name); break;
+                    case "clearSprites": this.clearSprites(); break;
                 }
             }
         }
 
         clearSprites() {
-            while (this._spriteLayer.children.length > 0) {
-                this._spriteLayer.removeChildAt(0);
-            }
+            while (this._spriteLayer.children.length > 0) this._spriteLayer.removeChildAt(0);
+            this._busts = {};
+            this._itemSprite = null;
+            this._animations = [];
         }
 
         updateBackgroundLayer(name, layer) {
             const bitmap = ImageManager.loadParallax(name);
-            if (layer === "background") {
-                this._bgUpper.bitmap = bitmap;
-            } else if (layer === "foreground") {
-                this._bgLower.bitmap = bitmap;
-            }
+            if (layer === "background") this._bgUpper.bitmap = bitmap;
+            else if (layer === "foreground") this._bgLower.bitmap = bitmap;
         }
 
         showBust(name, pos, effect, duration) {
+            if (this._busts[pos]) {
+                this._spriteLayer.removeChild(this._busts[pos]);
+            }
             const bust = new Sprite_LNBust();
             bust.setup(name, pos);
             this._spriteLayer.addChild(bust);
             bust.applyEffect(effect, duration);
+            this._busts[pos] = bust;
         }
 
         showItem(name, effect, duration) {
+            if (this._itemSprite) {
+                this._spriteLayer.removeChild(this._itemSprite);
+            }
             const item = new Sprite_LNFullImage();
             item.setup(name);
-            // Items should be below the text layer but above background
             this._spriteLayer.addChildAt(item, 0);
             item.applyEffect(effect, duration);
+            this._itemSprite = item;
         }
 
         playMusic(name, volume) {
-            const bgm = {
-                name: name,
-                pan: 0,
-                pitch: 100,
-                volume: volume || 90
-            };
-            AudioManager.playBgm(bgm);
+            AudioManager.playBgm({ name, pan: 0, pitch: 100, volume: volume || 90 });
         }
 
         playSe(name) {
-            const se = {
-                name: name,
-                pan: 0,
-                pitch: 100,
-                volume: 90
-            };
-            AudioManager.playSe(se);
+            AudioManager.playSe({ name, pan: 0, pitch: 100, volume: 90 });
         }
 
         playParticles(name) {
             const animation = $dataAnimations.find(a => a && a.name === name);
             if (animation) {
-                $gameTemp.requestAnimation([this._spriteLayer], animation.id);
+                const sprite = new Sprite_Animation();
+                sprite.setup([this._spriteLayer], animation, false, 0, null);
+                this._spriteLayer.addChild(sprite);
+                this._animations.push(sprite);
             }
         }
 
-        isReady() {
-            return super.isReady() && LN_Manager.isReady();
+        processOk() {
+            const index = this.index();
+            const handlers = [
+                this.onControlPlay, this.onControlNext, this.onControlPrev,
+                this.onControlSkipF, this.onControlSkipB, this.onControlMute, this.onControlSettings
+            ];
+            if (handlers[index]) handlers[index].call(this);
+            this.activate();
         }
     }
 
+    //-----------------------------------------------------------------------------
+    // Scene_LNReader
+    //
+
+    class Scene_LNReader extends Scene_Base {
+        create() {
+            super.create();
+            this.createBackground();
+            this.createWindowLayer();
+            this.createReaderWindow();
+            LN_Manager.loadData().then(() => this._readerWindow.refreshReader());
+        }
+
+        createBackground() {
+            this._backgroundSprite = new Sprite(SceneManager.backgroundBitmap());
+            this.addChild(this._backgroundSprite);
+        }
+
+        createReaderWindow() {
+            const rect = new Rectangle(0, 0, Graphics.width, Graphics.height);
+            this._readerWindow = new Window_LNReader(rect);
+            this._readerWindow.setHandler("cancel", this.popScene.bind(this));
+            this.addWindow(this._readerWindow);
+            this._readerWindow.activate();
+            this._readerWindow.select(0);
+        }
+
+        isReady() { return super.isReady() && LN_Manager.isReady(); }
+    }
+
     window.Scene_LNReader = Scene_LNReader;
-    Jules.LNReader.Scene_LNReader = Scene_LNReader;
 
     //-----------------------------------------------------------------------------
     // Menu Integration
@@ -595,17 +500,13 @@ Jules.LNReader = Jules.LNReader || {};
     const _Window_MenuCommand_addMainCommands = Window_MenuCommand.prototype.addMainCommands;
     Window_MenuCommand.prototype.addMainCommands = function() {
         _Window_MenuCommand_addMainCommands.call(this);
-        if (showInMenu) {
-            this.addCommand(menuCommandName, "lnReader", true);
-        }
+        if (showInMenu) this.addCommand(menuCommandName, "lnReader", true);
     };
 
     const _Scene_Menu_createCommandWindow = Scene_Menu.prototype.createCommandWindow;
     Scene_Menu.prototype.createCommandWindow = function() {
         _Scene_Menu_createCommandWindow.call(this);
-        this._commandWindow.setHandler("lnReader", () => {
-            SceneManager.push(Scene_LNReader);
-        });
+        this._commandWindow.setHandler("lnReader", () => SceneManager.push(Scene_LNReader));
     };
 
 })();
