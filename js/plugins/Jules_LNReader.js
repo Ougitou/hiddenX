@@ -43,6 +43,7 @@ Jules.LNReader = Jules.LNReader || {};
 (() => {
     "use strict";
 
+    // --- Plugin Parameters Initialization ---
     const pluginName = "Jules_LNReader";
     const parameters = PluginManager.parameters(pluginName);
     const menuCommandName = String(parameters["menuCommandName"] || "LN Reader");
@@ -50,6 +51,10 @@ Jules.LNReader = Jules.LNReader || {};
     const storyFilePath = String(parameters["storyFile"] || "text/story.txt");
     const triggerFilePath = String(parameters["triggerFile"] || "text/triggers.txt");
 
+    /**
+     * LN_STATE Enum
+     * Defines the possible states for the reader's state machine.
+     */
     const LN_STATE = {
         INIT: "init",
         LOADING: "loading",
@@ -62,16 +67,20 @@ Jules.LNReader = Jules.LNReader || {};
     //-----------------------------------------------------------------------------
     // LN_Manager
     //
-    // The static class that manages the light novel data and state.
+    // The static class that manages the light novel data, navigation, and global state.
 
     class LN_Manager {
         constructor() {
             throw new Error("This is a static class");
         }
 
+        /**
+         * initialize
+         * Resets the manager state. Called once when the plugin loads.
+         */
         static initialize() {
-            this._story = [];
-            this._triggers = {};
+            this._story = [];      // Array of strings (each line is a narrative frame)
+            this._triggers = {};   // Object mapping line indices to trigger arrays
             this._currentIndex = -1;
             this._state = LN_STATE.INIT;
         }
@@ -80,14 +89,22 @@ Jules.LNReader = Jules.LNReader || {};
         static setState(state) { this._state = state; }
         static isReady() { return this._state !== LN_STATE.INIT && this._state !== LN_STATE.LOADING; }
 
+        /**
+         * loadData
+         * Asynchronously fetches the story and trigger files from the paths
+         * specified in the plugin parameters.
+         */
         static async loadData() {
             this.setState(LN_STATE.LOADING);
             try {
+                // Fetch and parse story text
                 const storyRes = await fetch(storyFilePath);
                 if (!storyRes.ok) throw new Error("Could not load " + storyFilePath);
                 const storyText = await storyRes.text();
+                // Filter out empty lines to avoid blank frames
                 this._story = storyText.split(/\r?\n/).filter(line => line.trim() !== "");
 
+                // Fetch and parse trigger JSON
                 const triggersRes = await fetch(triggerFilePath);
                 if (!triggersRes.ok) throw new Error("Could not load " + triggerFilePath);
                 const triggersJson = await triggersRes.json();
@@ -102,9 +119,15 @@ Jules.LNReader = Jules.LNReader || {};
             }
         }
 
+        /**
+         * Data Accessors
+         */
         static currentText() { return this._story[this._currentIndex] || ""; }
         static currentTriggers() { return this._triggers[this._currentIndex] || []; }
 
+        /**
+         * Navigation Logic
+         */
         static next() {
             if (this._currentIndex < this._story.length - 1) {
                 this._currentIndex++;
@@ -135,7 +158,8 @@ Jules.LNReader = Jules.LNReader || {};
     //-----------------------------------------------------------------------------
     // Sprite_LNBust
     //
-    // A sprite class for character busts.
+    // A specialized sprite class for character busts with depth-simulating positioning
+    // and basic entrance animations.
 
     class Sprite_LNBust extends Sprite {
         constructor() {
@@ -145,11 +169,17 @@ Jules.LNReader = Jules.LNReader || {};
             this._duration = 0;
         }
 
+        /**
+         * setup
+         * @param {string} name - Picture filename.
+         * @param {string} pos - "lowerLeft" (foreground) or "upperLeft" (background).
+         */
         setup(name, pos) {
             this.bitmap = ImageManager.loadPicture(name);
             this._targetX = 0;
             this._targetY = 0;
 
+            // Layout calculations based on the 88% visual / 12% control split
             if (pos === "lowerLeft") {
                 this._targetX = Graphics.width * 0.2;
                 this._targetY = Graphics.height * 0.88;
@@ -161,6 +191,10 @@ Jules.LNReader = Jules.LNReader || {};
             this.y = this._targetY;
         }
 
+        /**
+         * applyEffect
+         * Sets up an entrance effect.
+         */
         applyEffect(effect, duration) {
             this._effect = effect;
             this._duration = duration || 60;
@@ -168,11 +202,15 @@ Jules.LNReader = Jules.LNReader || {};
             if (effect === "fadeIn") {
                 this.opacity = 0;
             } else if (effect === "move") {
-                this.x = -200; // Simplified start position
+                this.x = -200; // Start off-screen
                 this._startX = this.x;
             }
         }
 
+        /**
+         * update
+         * Manually called by the parent window to drive animations.
+         */
         update() {
             super.update();
             if (this._duration > 0) {
@@ -189,7 +227,7 @@ Jules.LNReader = Jules.LNReader || {};
     //-----------------------------------------------------------------------------
     // Sprite_LNFullImage
     //
-    // A sprite class for full screen images or items.
+    // A sprite class for centered full-screen images or items.
 
     class Sprite_LNFullImage extends Sprite {
         constructor() {
@@ -230,22 +268,27 @@ Jules.LNReader = Jules.LNReader || {};
     //-----------------------------------------------------------------------------
     // Window_LNReader
     //
-    // Consolidated window for everything.
+    // The core "Single Window" class. It manages all visuals (backgrounds, sprites, text)
+    // and interactive controls (buttons).
 
     class Window_LNReader extends Window_Selectable {
         constructor(rect) {
             super(rect);
-            this.opacity = 0;
-            this.padding = 0;
-            this.openness = 255; // Ensure window is open to process input
+            this.opacity = 0;      // Hidden frame
+            this.padding = 0;      // Full utilization of space
+            this.openness = 255;   // Fully open to allow input processing
             this._playWaitCount = 0;
-            this._busts = {};
+            this._busts = {};      // Track active busts by position key
             this._itemSprite = null;
-            this._animations = [];
+            this._animations = []; // Active Effekseer animations
             this.createVisualLayers();
             this.refresh();
         }
 
+        /**
+         * createVisualLayers
+         * Initializes the hierarchical layers for the visual components.
+         */
         createVisualLayers() {
             const width = Graphics.width;
             const height = Graphics.height;
@@ -253,7 +296,7 @@ Jules.LNReader = Jules.LNReader || {};
             this._visualHeight = height - this._controlHeight;
             this._halfVisualHeight = Math.floor(this._visualHeight / 2);
 
-            // Layers
+            // Layer 0: Backgrounds
             this._bgContainer = new Sprite();
             this.addChildAt(this._bgContainer, 0);
 
@@ -266,10 +309,15 @@ Jules.LNReader = Jules.LNReader || {};
             this._bgLower.bitmap = new Bitmap(width, this._halfVisualHeight);
             this._bgContainer.addChild(this._bgLower);
 
+            // Layer 1: Sprites (Busts/Items)
             this._spriteLayer = new Sprite();
             this.addChildAt(this._spriteLayer, 1);
         }
 
+        /**
+         * Window_Selectable overrides
+         * Maps the single window's selection logic to the bottom control bar.
+         */
         maxCols() { return 7; }
         maxItems() { return 7; }
 
@@ -282,6 +330,7 @@ Jules.LNReader = Jules.LNReader || {};
         }
 
         drawAllItems() {
+            // Draw semi-transparent background for the control bar
             const rect = new Rectangle(0, this.innerHeight - this._controlHeight, this.innerWidth, this._controlHeight);
             this.contents.fillRect(rect.x, rect.y, rect.width, rect.height, "#00000088");
             super.drawAllItems();
@@ -296,6 +345,10 @@ Jules.LNReader = Jules.LNReader || {};
             this.drawText(text, rect.x, rect.y, rect.width, "center");
         }
 
+        /**
+         * refresh
+         * Redraws the UI (buttons and current narrative text).
+         */
         refresh() {
             if (this.contents) {
                 this.contents.clear();
@@ -304,36 +357,52 @@ Jules.LNReader = Jules.LNReader || {};
             }
         }
 
+        /**
+         * drawNarrative
+         * Renders the current story line using drawTextEx for word wrapping.
+         */
         drawNarrative() {
             const text = LN_Manager.currentText();
             const width = this.innerWidth;
-            const y = this._halfVisualHeight - 40;
+            const y = this._halfVisualHeight - 40; // Center text on the horizon line
             this.contents.fontSize = 26;
             this.drawTextEx(text, 20, y, width - 40);
         }
 
+        /**
+         * update
+         * The main update loop for the window.
+         */
         update() {
             super.update();
             this.updateStateMachine();
             this.updateInternalSprites();
         }
 
+        /**
+         * updateStateMachine
+         * Handles auto-play timing when in the PLAYING state.
+         */
         updateStateMachine() {
             if (LN_Manager.state() === LN_STATE.PLAYING) {
                 this._playWaitCount++;
-                if (this._playWaitCount >= 120) {
+                if (this._playWaitCount >= 120) { // 2 second delay between frames
                     this._playWaitCount = 0;
                     this.onControlNext();
                 }
             }
         }
 
+        /**
+         * updateInternalSprites
+         * IMPORTANT: Manually calls update() on all child sprites (busts, items, animations)
+         * since RM MZ windows do not automatically update their child objects.
+         */
         updateInternalSprites() {
-            // Manually update sprites that are children of the window
             for (const child of this._spriteLayer.children) {
                 if (child.update) child.update();
             }
-            // Update animations
+            // Update and cleanup finished animations
             for (let i = this._animations.length - 1; i >= 0; i--) {
                 const anim = this._animations[i];
                 if (anim.update) anim.update();
@@ -344,6 +413,9 @@ Jules.LNReader = Jules.LNReader || {};
             }
         }
 
+        /**
+         * Control Event Handlers
+         */
         onControlPlay() {
             if (LN_Manager.state() === LN_STATE.PLAYING) LN_Manager.setState(LN_STATE.PAUSED);
             else LN_Manager.setState(LN_STATE.PLAYING);
@@ -370,6 +442,7 @@ Jules.LNReader = Jules.LNReader || {};
         }
 
         onControlMute() {
+            // Toggles master BGM volume between 0 and 100
             ConfigManager.bgmVolume = ConfigManager.bgmVolume > 0 ? 0 : 100;
             ConfigManager.save();
             ConfigManager.applyData();
@@ -379,11 +452,19 @@ Jules.LNReader = Jules.LNReader || {};
             SceneManager.push(Scene_Options);
         }
 
+        /**
+         * refreshReader
+         * Updates the UI and executes all visual/audio triggers for the new line.
+         */
         refreshReader() {
             this.refresh();
             this.executeTriggers(LN_Manager.currentTriggers());
         }
 
+        /**
+         * executeTriggers
+         * Iterates through trigger data and dispatches actions.
+         */
         executeTriggers(triggers) {
             if (!triggers || !Array.isArray(triggers)) return;
             for (const trigger of triggers) {
@@ -413,6 +494,7 @@ Jules.LNReader = Jules.LNReader || {};
         }
 
         showBust(name, pos, effect, duration) {
+            // If a bust exists in this position, remove it to prevent stacking
             if (this._busts[pos]) {
                 this._spriteLayer.removeChild(this._busts[pos]);
             }
@@ -429,6 +511,7 @@ Jules.LNReader = Jules.LNReader || {};
             }
             const item = new Sprite_LNFullImage();
             item.setup(name);
+            // Items are added at index 0 to stay behind character busts
             this._spriteLayer.addChildAt(item, 0);
             item.applyEffect(effect, duration);
             this._itemSprite = item;
@@ -452,6 +535,10 @@ Jules.LNReader = Jules.LNReader || {};
             }
         }
 
+        /**
+         * processOk
+         * Maps button index to the corresponding event handler.
+         */
         processOk() {
             const index = this.index();
             const handlers = [
@@ -469,13 +556,19 @@ Jules.LNReader = Jules.LNReader || {};
     //-----------------------------------------------------------------------------
     // Scene_LNReader
     //
+    // The scene class that initializes the reader environment.
 
     class Scene_LNReader extends Scene_Base {
+        /**
+         * create
+         * Setup the visual hierarchy and trigger data loading.
+         */
         create() {
             super.create();
             this.createBackground();
             this.createWindowLayer();
             this.createReaderWindow();
+            // Start data load and refresh UI once ready
             LN_Manager.loadData().then(() => this._readerWindow.refreshReader());
         }
 
@@ -493,14 +586,19 @@ Jules.LNReader = Jules.LNReader || {};
             this._readerWindow.select(0);
         }
 
+        /**
+         * isReady
+         * The scene is ready once both Scene_Base and the LN_Manager are ready.
+         */
         isReady() { return super.isReady() && LN_Manager.isReady(); }
     }
 
     window.Scene_LNReader = Scene_LNReader;
 
     //-----------------------------------------------------------------------------
-    // Menu Integration
+    // Menu Integration (Aliases)
     //
+    // Patches the main menu to include the LN Reader command.
 
     const _Window_MenuCommand_addMainCommands = Window_MenuCommand.prototype.addMainCommands;
     Window_MenuCommand.prototype.addMainCommands = function() {
