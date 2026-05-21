@@ -360,39 +360,8 @@ Jules.LNReader = Jules.LNReader || {};
         }
     };
 
-    Window_LNReader.prototype.onControlPlay = function() {
-        if (LN_Manager.state() === "playing") LN_Manager.setState("paused");
-        else LN_Manager.setState("playing");
-        this._playWaitCount = 0;
-        this.refresh();
-    };
-
     Window_LNReader.prototype.onControlNext = function() {
-        if (LN_Manager.next()) this.refreshReader();
-    };
-
-    Window_LNReader.prototype.onControlPrev = function() {
-        if (LN_Manager.previous()) this.refreshReader();
-    };
-
-    Window_LNReader.prototype.onControlSkipF = function() {
-        LN_Manager.jumpTo(LN_Manager.currentIndex() + 10);
-        this.refreshReader();
-    };
-
-    Window_LNReader.prototype.onControlSkipB = function() {
-        LN_Manager.jumpTo(LN_Manager.currentIndex() - 10);
-        this.refreshReader();
-    };
-
-    Window_LNReader.prototype.onControlMute = function() {
-        ConfigManager.bgmVolume = ConfigManager.bgmVolume > 0 ? 0 : 100;
-        ConfigManager.save();
-        ConfigManager.applyData();
-    };
-
-    Window_LNReader.prototype.onControlSettings = function() {
-        SceneManager.push(Scene_Options);
+        this.callHandler("next");
     };
 
     Window_LNReader.prototype.refreshReader = function() {
@@ -470,13 +439,11 @@ Jules.LNReader = Jules.LNReader || {};
 
     Window_LNReader.prototype.processOk = function() {
         const index = this.index();
-        const handlers = [
-            this.onControlPlay, this.onControlNext, this.onControlPrev,
-            this.onControlSkipF, this.onControlSkipB, this.onControlMute, this.onControlSettings
-        ];
-        if (handlers[index]) {
+        const symbols = ["play", "next", "prev", "skipF", "skipB", "mute", "settings"];
+        const symbol = symbols[index];
+        if (symbol) {
             this.playOkSound();
-            handlers[index].call(this);
+            this.callHandler(symbol);
         }
         this.activate();
     };
@@ -513,10 +480,53 @@ Jules.LNReader = Jules.LNReader || {};
     Scene_LNReader.prototype.createReaderWindow = function() {
         const rect = new Rectangle(0, 0, Graphics.width, Graphics.height);
         this._readerWindow = new Window_LNReader(rect);
+        this._readerWindow.setHandler("play", this.onControlPlay.bind(this));
+        this._readerWindow.setHandler("next", this.onControlNext.bind(this));
+        this._readerWindow.setHandler("prev", this.onControlPrev.bind(this));
+        this._readerWindow.setHandler("skipF", this.onControlSkipF.bind(this));
+        this._readerWindow.setHandler("skipB", this.onControlSkipB.bind(this));
+        this._readerWindow.setHandler("mute", this.onControlMute.bind(this));
+        this._readerWindow.setHandler("settings", this.onControlSettings.bind(this));
         this._readerWindow.setHandler("cancel", this.popScene.bind(this));
         this.addWindow(this._readerWindow);
         this._readerWindow.activate();
         this._readerWindow.select(0);
+    };
+
+    Scene_LNReader.prototype.onControlPlay = function() {
+        if (LN_Manager.state() === "playing") LN_Manager.setState("paused");
+        else LN_Manager.setState("playing");
+        this._readerWindow._playWaitCount = 0;
+        this._readerWindow.refresh();
+    };
+
+    Scene_LNReader.prototype.onControlNext = function() {
+        if (LN_Manager.next()) this._readerWindow.refreshReader();
+    };
+
+    Scene_LNReader.prototype.onControlPrev = function() {
+        if (LN_Manager.previous()) this._readerWindow.refreshReader();
+    };
+
+    Scene_LNReader.prototype.onControlSkipF = function() {
+        LN_Manager.jumpTo(LN_Manager.currentIndex() + 10);
+        this._readerWindow.refreshReader();
+    };
+
+    Scene_LNReader.prototype.onControlSkipB = function() {
+        LN_Manager.jumpTo(LN_Manager.currentIndex() - 10);
+        this._readerWindow.refreshReader();
+    };
+
+    Scene_LNReader.prototype.onControlMute = function() {
+        ConfigManager.bgmVolume = ConfigManager.bgmVolume > 0 ? 0 : 100;
+        ConfigManager.save();
+        ConfigManager.applyData();
+        this._readerWindow.refresh();
+    };
+
+    Scene_LNReader.prototype.onControlSettings = function() {
+        SceneManager.push(Scene_Options);
     };
 
     Scene_LNReader.prototype.isReady = function() {

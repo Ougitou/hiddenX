@@ -1,14 +1,14 @@
 # Light Novel Reader System Documentation
 
-This document describes the system architecture and logic flow of the `Jules_LNReader` plugin for RPG Maker MZ.
+This document describes the system architecture and logic flow of the `Jules_LNReader` plugin for RPG Maker MZ, refactored to follow core engine standards.
 
 ## 1. System Architecture (Component Overview)
 
-The system is built on a Model-View-Controller (MVC) inspired architecture:
+The system follows the standard RPG Maker MZ prototype-based architecture and MVC pattern:
 
-*   **Model (LN_Manager):** A static class that holds the narrative data (`story.txt`) and trigger data (`triggers.txt`). It manages the state machine (INIT -> LOADING -> READY) and the current narrative index.
-*   **View (Window_LNReader):** A single unified window that renders all visual layers (Backgrounds, Busts, Items, Narrative Text) and the interactive Control Bar.
-*   **Controller (Scene_LNReader):** Coordinates between the Manager and the Window. It initializes the environment and handles scene transitions.
+*   **Model (LN_Manager):** A global-like static manager that handles narrative data (`story.txt`) and trigger data (`triggers.txt`). It manages the state machine (init -> loading -> ready -> playing -> paused).
+*   **View (Window_LNReader):** A single full-screen window (inheriting from `Window_Selectable`) that manages hierarchical sprite layers for backgrounds, character busts, and items. It renders narrative text using `drawTextEx`.
+*   **Controller (Scene_LNReader):** The orchestrator (inheriting from `Scene_Base`) that initializes the manager, creates the window, and resolves user interactions via the standard handler pattern.
 
 ---
 
@@ -20,34 +20,33 @@ The system is built on a Model-View-Controller (MVC) inspired architecture:
 |
 v
 Scene_LNReader.create()
-|-- Window_LNReader.create()
-|   |-- Initialize Visual Layers (BG, Sprite, Text)
-|   |-- Setup Selectable Controls (Play, Next, etc.)
+|-- Scene_LNReader.createReaderWindow()
+|   |-- Window_LNReader.initialize()
+|   |-- Window_LNReader.setHandler(symbol, method) // Link buttons to Scene methods
 v
 LN_Manager.loadData() (Asynchronous)
 |-- Fetch story.txt -> Parse into Array
 |-- Fetch triggers.txt -> Parse into JSON Object
 v
-On Success: Set State = READY
+On Success: Set State = "ready"
 v
-Window_LNReader.refreshReader()
-|-- Window_LNReader.refresh() (Draw current text)
-|-- Window_LNReader.executeTriggers() (Process Line 0 Actions)
+Scene_LNReader (Trigger first turn):
+|-- Window_LNReader.refreshReader()
+|   |-- Window_LNReader.refresh() (Draw current text)
+|   |-- Window_LNReader.executeTriggers() (Process Line 0 Actions)
 ```
 
-### B. Frame Update Loop (State Machine)
+### B. Frame Update Loop
 ```text
 Window_LNReader.update()
-|-- If State == PLAYING:
-|   |-- Auto-Play Timer++
-|   |-- If Timer >= 120 Frames:
-|       |-- Execute "Next" Logic
+|-- Window_Selectable.prototype.update.call(this) (Automatic child sprite updates)
+|-- Window_LNReader.updateStateMachine()
+|   |-- If State == "playing":
+|       |-- Auto-Play Timer++
+|       |-- If Timer >= 120 Frames: Execute "next" Handler
 |
-|-- updateInternalSprites() (CRITICAL)
-|   |-- For each Child Sprite (Bust/Item):
-|       |-- Child.update() (Drive Fade/Move/Zoom animations)
-|   |-- For each Active Animation (Particles):
-|       |-- Animation.update()
+|-- Window_LNReader.updateAnimationCleanup()
+|   |-- For each Active Effekseer Animation:
 |       |-- If finished: Remove from Layer
 ```
 
@@ -56,58 +55,46 @@ Window_LNReader.update()
 Input: [OK] on "Next" Button
 |
 v
-LN_Manager.next()
-|-- Increment currentIndex
-|-- Return TRUE if within bounds
+Window_LNReader.processOk()
+|-- Window_LNReader.callHandler("next")
 v
-Window_LNReader.refreshReader()
-|-- Contents.clear()
-|-- Draw current story line text
-|-- executeTriggers(currentIndex)
-    |-- switch(trigger.type):
-        |-- "bg": Update Background Bitmaps
-        |-- "bust": Add/Replace Sprite at Pos (apply entrance effect)
-        |-- "item": Add/Replace Item Sprite
-        |-- "music/se": Play Audio via AudioManager
-        |-- "particles": Play Animation via Sprite_Animation
+Scene_LNReader.onControlNext()
+|-- LN_Manager.next()
+|-- If success: Window_LNReader.refreshReader()
+    |-- Contents.clear()
+    |-- Draw current story line text
+    |-- executeTriggers(currentIndex)
 ```
 
 ---
 
 ## 3. Interaction Logic (Pseudo Code)
 
-### Button Handling (`processOk`)
+### Button Handler Resolution (Scene-level)
 ```javascript
-FUNCTION processOk():
-    index = this.index()
+// Scene_LNReader handles the "How" of the controls
+FUNCTION onControlMute():
+    ConfigManager.bgmVolume = toggle(0, 100)
+    ConfigManager.save()
+    ConfigManager.applyData()
+    this._readerWindow.refresh()
 
-    SWITCH index:
-        CASE 0 (Play): Toggle State (PLAYING <-> PAUSED)
-        CASE 1 (Next): LN_Manager.next() -> refreshReader()
-        CASE 2 (Prev): LN_Manager.previous() -> refreshReader()
-        CASE 3 (FF): LN_Manager.jumpTo(current + 10) -> refreshReader()
-        CASE 4 (RW): LN_Manager.jumpTo(current - 10) -> refreshReader()
-        CASE 5 (Mute): Toggle ConfigManager.bgmVolume
-        CASE 6 (Set): SceneManager.push(Scene_Options)
-
-    this.activate() // Keep window active for next input
+FUNCTION onControlPlay():
+    LN_Manager.setState(is_playing ? "paused" : "playing")
+    this._readerWindow.refresh()
 ```
 
-### Trigger Execution (`executeTriggers`)
+### Sprite Layering & Replacement
 ```javascript
-FUNCTION executeTriggers(triggers):
-    FOR EACH trigger IN triggers:
-        IF trigger.type == "bust":
-            // Avoid stacking: remove existing bust at same position
-            IF this._busts[trigger.pos] EXISTS:
-                Remove old bust
+// Window_LNReader handles the "What" of visuals
+FUNCTION showBust(name, pos, effect, duration):
+    // Position-based replacement prevents sprite stacking
+    IF this._busts[pos] EXISTS:
+        this._spriteLayer.removeChild(this._busts[pos])
 
-            newBust = CREATE Sprite_LNBust
-            newBust.setup(trigger.name, trigger.pos)
-            newBust.applyEffect(trigger.effect, trigger.duration)
-            this._busts[trigger.pos] = newBust
-
-        ELSE IF trigger.type == "clearSprites":
-            Remove all children from SpriteLayer
-            Reset bust/item tracking objects
+    bust = NEW Sprite_LNBust()
+    bust.setup(name, pos)
+    bust.applyEffect(effect, duration)
+    this._spriteLayer.addChild(bust)
+    this._busts[pos] = bust
 ```
