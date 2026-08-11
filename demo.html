@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scroll Audio Trigger - Interactive Demo</title>
+    <style>
+        :root {
+            --bg-color: #0f111a;
+            --text-color: #a6accd;
+            --header-color: #00ffcc;
+            --card-bg: #1e2130;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.8;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        header {
+            width: 100%;
+            max-width: 800px;
+            padding: 40px 20px 20px 20px;
+            box-sizing: border-box;
+            text-align: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        h1 {
+            color: var(--header-color);
+            margin-bottom: 10px;
+            font-size: 2.5rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .subtitle {
+            font-size: 1.1rem;
+            opacity: 0.8;
+            margin-bottom: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            padding: 20px;
+            box-sizing: border-box;
+            margin-bottom: 100px; /* Spacer at the bottom so last paragraphs can scroll past the trigger line */
+        }
+
+        .non-p-section {
+            background-color: var(--card-bg);
+            border: 1px dashed rgba(255, 255, 255, 0.15);
+            padding: 20px;
+            border-radius: 8px;
+            margin: 40px 0;
+            font-size: 0.95rem;
+        }
+
+        .non-p-section h3 {
+            color: var(--header-color);
+            margin-top: 0;
+        }
+
+        p {
+            font-size: 1.2rem;
+            margin: 80px 0;
+            padding: 20px;
+            border-radius: 8px;
+            background-color: rgba(255, 255, 255, 0.02);
+            border-left: 4px solid transparent;
+            transition: all 0.3s ease;
+        }
+
+        p strong {
+            color: #ffffff;
+        }
+
+        .badge {
+            display: inline-block;
+            background-color: #3b4252;
+            color: #eceff4;
+            font-size: 0.8rem;
+            font-family: monospace;
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+
+        .badge.active-badge {
+            background-color: var(--header-color);
+            color: #000;
+            font-weight: bold;
+        }
+
+        footer {
+            margin-top: auto;
+            padding: 20px;
+            font-size: 0.85rem;
+            opacity: 0.6;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Scroll Trigger</h1>
+        <div class="subtitle">Interactive Scroll-to-Audio Engine demo. Experience soundscapes generated exclusively as paragraphs scroll past the threshold line.</div>
+    </header>
+
+    <main class="container">
+
+        <div class="non-p-section">
+            <h3>Engine Configuration & System Indexing Rules</h3>
+            <ul>
+                <li><strong>Strict Target Selection:</strong> Only <code>&lt;p&gt;</code> elements are indexed. This container, headings, and lists are ignored.</li>
+                <li><strong>Interaction Unlock:</strong> Modern browsers prevent autoplay. Scroll or click anywhere on the viewport to unlock the audio context.</li>
+                <li><strong>Index mapping:</strong> The engine automatically detects the 0-indexed order of paragraphs.</li>
+            </ul>
+        </div>
+
+        <p data-audio="audio/ambient_wind.mp3">
+            <span class="badge">Index 0</span><br>
+            <strong>Paragraph One:</strong> The cold wind began to blow across the desolate, snowy plains. If you look closely at the debug overlay on your top-left, you will see Index 0 became active as this paragraph crossed the red threshold trigger line. A local wind ambient sound (<code>ambient_wind.mp3</code>) has been cued.
+        </p>
+
+        <p>
+            <span class="badge">Index 1</span><br>
+            <strong>Paragraph Two:</strong> This is the second paragraph in the system, mapped to Index 1. Because this paragraph does not have any <code>data-audio</code> attribute and isn't programmatically registered to any audio, it will scroll past the threshold line silently. It still gets highlighted and tracked in real-time.
+        </p>
+
+        <p data-audio="audio/footsteps.ogg">
+            <span class="badge">Index 2 (OGG format)</span><br>
+            <strong>Paragraph Three:</strong> Suddenly, footsteps crunching in the thick snow could be heard. This paragraph is mapped to Index 2 and plays <code>footsteps.ogg</code>. Notice how the previous playing audio immediately stops (or pauses) to ensure soundscapes never overlap messy or jarring sounds together.
+        </p>
+
+        <div class="non-p-section">
+            <h3>Visual & structural break</h3>
+            This section is a div element containing text and headings. It does not get indexed as a paragraph. Notice that as this box scrolls past the trigger line, the active index remains on the previous paragraph, and no sound changes occur. Only real paragraph elements count!
+        </div>
+
+        <p data-audio="audio/door_creak.mp3">
+            <span class="badge">Index 3</span><br>
+            <strong>Paragraph Four:</strong> A heavy wooden door creaks open in the distance. This paragraph uses index 3 to play <code>door_creak.mp3</code>. You can configure options like <code>viewportThreshold</code> (where the trigger line sits), whether to stop previous audios, and replay settings.
+        </p>
+
+        <p>
+            <span class="badge">Index 4</span><br>
+            <strong>Paragraph Five:</strong> This is the final paragraph. It has Index 4. It does not play any audio, letting the story settle in quiet suspense. Scroll back up and down to experience the soundscapes triggering instantly and accurately.
+        </p>
+
+    </main>
+
+    <footer>
+        Scroll Audio Trigger Attachment &copy; Jules
+    </footer>
+
+    <!-- Load our scroll audio trigger attachment -->
+    <script src="scroll-audio-trigger.js"></script>
+    <script>
+        // Programmatic initialization example
+        // (The scroll-audio-trigger attachment auto-initializes if it detects "data-audio" on any <p>,
+        // but can also be manually configured like below if needed!)
+
+        // Example configuration (will merge with options and existing data-attributes):
+        /*
+        const trigger = new ScrollAudioTrigger({
+            viewportThreshold: 0.45, // Trigger when paragraph is 45% down from top of screen
+            stopPrevious: true,      // Stop last playing track
+            replayOnReentry: true,   // Re-trigger audio on scrolling back
+            debug: true,             // Enables visual line and debug status overlay
+            audioMap: {
+                0: 'audio/ambient_wind.mp3',
+                2: 'audio/footsteps.ogg',
+                3: 'audio/door_creak.mp3'
+            }
+        });
+        */
+    </script>
+</body>
+</html>
